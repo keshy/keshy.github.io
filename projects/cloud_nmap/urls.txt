@@ -1,0 +1,17 @@
+EC2 images:
+http://kinlane-productions.s3.amazonaws.com/amazon/amazon-ec2-icon.png
+
+Security groups:
+http://www.linuxsecurity.com/images/stories/icons/serversecurity-icon.gif
+
+Volumes:
+http://www.enginehosting.com/images/design/icon_load_balance.png
+
+AMI:
+http://cdn3.iconfinder.com/data/icons/socialnetworking/32/windows.png
+
+subnet:
+http://www.iconshock.com/img_jpg/PLASTICXP/networking/jpg/32/subnet_icon.jpg
+
+ELB:
+http://hostingcontroller.com/images/Icons-large/Load-balance.jpg

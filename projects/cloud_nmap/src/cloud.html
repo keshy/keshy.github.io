@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+
+    <head>
+        <title>Cloud Deployment Visualization</title>
+        <script type="text/javascript" src="/projects/cloud_nmap/lib/vivagraph.js"></script>
+        <script type="text/javascript" src="/projects/cloud_nmap/lib/log4js.js"></script>
+
+        <link rel="stylesheet" href="http://code.jquery.com/ui/1.9.1/themes/base/jquery-ui.css"
+        />
+        <script type="text/javascript" src="/projects/cloud_nmap/lib/jquery-1.8.0.min.js"></script>
+        <script type="text/javascript" src="/projects/cloud_nmap/lib/jquery.jsonp.js"></script>
+
+        <script type="text/javascript">
+            function main(resource, fieldSelector) {
+                var urls = {
+                    'ec2' : '/projects/cloud_nmap/img/amazon-ec2-icon.png',
+                    'sg' : '/projects/cloud_nmap/img/lock.png',
+                    'vol' : '/projects/cloud_nmap/img/volume.png',
+                    'image' : '/projects/cloud_nmap/img/os.jpg',
+                    'subnet' : '/projects/cloud_nmap/img/subnet_icon.jpg',
+                    'elb' : '/projects/cloud_nmap/img/Load-balance.jpg',
+                    'zone' : '/projects/cloud_nmap/img/zone.png',
+                    'publicIP' : '/projects/cloud_nmap/img/alert.png'
+                };
+
+                var graph = Viva.Graph.graph();
+
+                var graphics = Viva.Graph.View.svgGraphics(), nodeSize = 40;
+
+                var layout = Viva.Graph.Layout.forceDirected(graph, {
+                    springLength : 80,
+                    springCoeff : 0.0008,
+                    dragCoeff : 0.09,
+                    gravity : -1.20
+                });
+
+                // read from file and populate JSON object
+                if (resource != null) {
+                    if (resource.type == 'ec2') {
+                        queryInstances([resource.id], 0, 1);
+                    } else if (resource.type == 'vpc') {
+
+                        queryVPC(resource.id);
+                    }
+                }
+
+                // step 1. read all instances that are part of a VPC;
+                function queryVPC(vpcId) {
+                    logger.info('fetching VPC information for ID ' + vpcId);
+                    $.jsonp({
+                        url : 'http://<server>:<port>/edda/api/v2/view/instances;vpcId=' + vpcId + ';_callback=callme',
+                        callback : 'callme',
+                        type : 'GET',
+                        crossDomain : true,
+                        dataType : 'jsonp',
+                        jsonp : false,
+                        cache : true,
+
+                        success : function(data, textStatus, xOptions) {
+                            logger.info('Server Response::' + JSON.stringify(data) + '\n');
+
+                            // pass call on to method to get instance details
+                            if (data.length > 0) {
+                                queryInstances(data, 0, data.length);
+                            }
+                            return;
+                        },
+                        error : function(jqXHR, textStatus, errorThrown) {
+                            logger.error('Response:: No data received from EDDA');
+                            logger.error("Status Returned: '" + textStatus + "'");
+                            alert('Could not retreive data from EDDA');
+                            $('.userInput').show();
+                            $('.navigation').hide();
+                            $('.svg').remove();
+                        }
+                    });
+                }
+
+                function queryInstances(data, cur, len) {
+                    // step 2 extract information about this instance.
+                    logger.info('fetching EC2 information for Instance :' + data[cur]);
+                    if (data && len > 0) {
+                        $.jsonp({
+                            url : 'http://<server>:<port>/edda/api/v2/view/instances/' + data[cur] + ';_callback=callme:(imageId,securityGroups,subnetId,placement:(availabilityZone),tags:(key,value),publicIpAddress,blockDeviceMappings:(ebs:(volumeId)))',
+                            callback : 'callme',
+                            type : 'GET',
+                            crossDomain : true,
+                            dataType : 'jsonp',
+                            jsonp : false,
+                            cache : true,
+                            invokedata : {
+                                instance : data,
+                                callback : callback
+                            },
+
+                            success : function(info, textStatus, xOptions) {
+                                logger.info('Server Response::' + JSON.stringify(info) + '\n');
+                                if (info != null) {
+                                    volume = info.blockDeviceMappings == null ? null : info.blockDeviceMappings;
+                                    numOfVolumes = volume == null ? null : volume.length;
+                                    image = info.imageId == null ? null : info.imageId;
+                                    zone = info.placement == null ? null : info.placement.availabilityZone == null ? null : info.placement.availabilityZone;
+                                    secGroups = info.securityGroups == null ? null : info.securityGroups;
+                                    subnetId = info.subnetId == null ? null : info.subnetId;
+                                    publicIP = info.publicIpAddress == null ? null : info.publicIpAddress;
+                                    if (info.tags == null || info.tags.length == 0) {
+                                        tag = null;
+                                    } else {
+                                        // find the tag with 'name' as name.
+                                        tag = null;
+                                        for (i in info.tags) {
+
+                                            if ('name'.toUpperCase() === info.tags[i].key.toUpperCase()) {
+                                                tag = info.tags[i].value;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                instanceInfo = {
+                                    'vol' : volume,
+                                    'image' : image,
+                                    'zone' : zone,
+                                    'sg' : secGroups,
+                                    'subnet' : subnetId,
+                                    'tag' : tag,
+                                    'publicIp' : publicIP
+                                };
+                                this.invokedata.callback(this.invokedata.instance[cur], instanceInfo);
+
+                                if (cur < len - 1) {
+                                    cur = cur + 1;
+
+                                    queryInstances(this.invokedata.instance, cur, len);
+                                }
+                            },
+                            error : function(jqXHR, textStatus, errorThrown) {
+                                logger.error('Response:: No data received from EDDA');
+                                logger.error("Status Returned: '" + textStatus + "'");
+                                alert('Could not retreive data from EDDA');
+                                $('.userInput').show();
+                                $('.navigation').hide();
+                                $('.svg').remove();
+                            }
+                        });
+                    } else {
+                        return;
+                    }
+                }
+
+                // load security groups from list to check which ones are not applied to any.
+
+                function callback(instance, instanceInfo) {
+
+                    id = (instanceInfo == null) ? instance : (instanceInfo.tag == null) ? instance : instanceInfo.tag;
+                    //id = instance;
+                    graph.addNode(id, urls.ec2);
+
+                    if (fieldSelector != null) {
+                        // add volumes:
+                        if (fieldSelector.vol && instanceInfo.vol.length > 0) {
+                            for (i in instanceInfo.vol) {
+                                if (graph.getNode(instanceInfo.vol[i].ebs.volumeId) == null) {
+                                    graph.addNode(instanceInfo.vol[i].ebs.volumeId, urls.vol);
+                                }
+                                graph.addLink(id, instanceInfo.vol[i].ebs.volumeId, 'brown');
+                            }
+                        }
+
+                        // add security groups
+                        if (fieldSelector.sg && instanceInfo.sg.length > 0) {
+                            for (i in instanceInfo.sg) {
+                                if (graph.getNode(instanceInfo.sg[i].groupId) == null) {
+                                    graph.addNode(instanceInfo.sg[i].groupId, urls.sg);
+                                }
+                                graph.addLink(id, instanceInfo.sg[i].groupId, 'red');
+                            }
+                        }
+
+                        // add subnet
+                        if (fieldSelector.subnet && instanceInfo.subnet) {
+                            if (graph.getNode(instanceInfo.subnet) == null) {
+                                graph.addNode(instanceInfo.subnet, urls.subnet);
+                            }
+                            graph.addLink(id, instanceInfo.subnet, 'green');
+                        }
+
+                        // add placement zone
+                        if (fieldSelector.zone && instanceInfo.zone) {
+                            if (graph.getNode(instanceInfo.zone) == null) {
+                                graph.addNode(instanceInfo.zone, urls.zone);
+                            }
+                            graph.addLink(id, instanceInfo.zone, 'purple');
+                        }
+
+                        // add ami
+                        if (fieldSelector.ami && instanceInfo.image) {
+                            if (graph.getNode(instanceInfo.image) == null) {
+                                graph.addNode(instanceInfo.image, urls.image);
+                            }
+                            graph.addLink(id, instanceInfo.image, 'blue');
+                        }
+
+                        // add alerts for public IPs
+                        if (fieldSelector.publicIP && instanceInfo.publicIp) {
+
+                            if (graph.getNode(instanceInfo.publicIp) == null) {
+                                graph.addNode(instanceInfo.publicIp, urls.publicIP);
+                            }
+                            graph.addLink(id, instanceInfo.publicIp, 'black');
+                        }
+
+                    }
+                    return;
+
+                }
+
+                function safeFailOut(msg) {
+                    // TODO: module to display error msg and log
+                    alert(msg);
+                    return;
+                }
+
+
+                graphics.node(function(node) {
+                    // This time it's a group of elements: http://www.w3.org/TR/SVG/struct.html#Groups
+                    var ui = Viva.Graph.svg('g'),
+                    // Create SVG text element with user id as content
+                    svgText = Viva.Graph.svg('text').attr('y', '-4px').text(node.id), img = Viva.Graph.svg('image').attr('width', nodeSize).attr('height', nodeSize).link(node.data);
+
+                    ui.append(svgText);
+                    ui.append(img);
+
+                    return ui;
+                }).placeNode(function(nodeUI, pos) {
+                    // 'g' element doesn't have convenient (x,y) attributes, instead
+                    // we have to deal with transforms: http://www.w3.org/TR/SVG/coords.html#SVGGlobalTransformAttribute
+                    nodeUI.attr('transform', 'translate(' + (pos.x - nodeSize / 2) + ',' + (pos.y - nodeSize / 2) + ')');
+                });
+
+                graphics.link(function(link) {
+                    return Viva.Graph.svg('line').attr('stroke', link.data).attr('stroke-width', '3');
+                });
+
+                // Render the graph
+                var renderer = Viva.Graph.View.renderer(graph, {
+
+                    graphics : graphics
+                });
+                renderer.run();
+            }
+        </script>
+        <style type="text/css" media="screen">
+            html, body, svg {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+
+    <body>
+        <style type="text/css">
+            .navigation {
+                font-family: verdana, arial, sans-serif;
+                font-size: 12pt;
+                display: none;
+                margin: 0px;
+                width: 1000px;
+                padding: 2px;
+                background-color: #ffcc00;
+            }
+            h3 {
+                font-family: arial;
+                font-size: 13pt;
+                margin-left: auto;
+                margin-right: auto;
+                padding: 0px;
+                align: center;
+            }
+            h1, p {
+                font-family: arial;
+                font-size: 18pt;
+                margin-left: auto;
+                margin-right: auto;
+                padding: 0px;
+            }
+            /* ----------- Login Form ----------- */
+            .userInput {
+                margin: 0 auto;
+                width: 400px;
+                padding: 14px;
+                font-size: 10pt;
+            }
+            /* ----------- stylized ----------- */
+            #stylized {
+                border: solid 2px #2D4552;
+                margin-left: 38%;
+                margin-top: 8%;
+            }
+            #stylized h1 {
+                font-size: 18px;
+                font-weight: bold;
+                margin-bottom: 8px;
+            }
+            #stylized p {
+                font-size: 12px;
+                color: #666666;
+                margin-bottom: 20px;
+                border-bottom: solid 1px #2D4552;
+                padding-bottom: 10px;
+            }
+            #stylized label {
+                font-weight: bold;
+                text-align: left;
+                width: 140px;
+                float: left;
+                font-size: 15px;
+            }
+            #stylized input {
+                float: left;
+                font-size: 12px;
+                border: solid 1px lightgray;
+                width: 200px;
+                margin-left: 0px;
+                margin-bottom: 10px;
+            }
+            #stylized a {
+                clear: both;
+                margin-left: 150px;
+                width: 125px;
+                height: 31px;
+                background: #5B5C5E;
+                text-align: center;
+                line-height: 31px;
+                color: #FFFFFF;
+                font-size: 25px;
+                font-weight: bold;
+            }
+            .class {
+                visibility: hidden
+            }
+        </style>
+        <script>
+            function overlay(type, resource, onload) {
+
+                if (!onload && (resource == null || resource.length == 0)) {
+                    //return null
+                    alert('Must enter both the resource type and the resource identifier for searching the AWS cloud infrastructure');
+                    logger.error('Invalid data entered');
+                    return;
+                }
+                if (resource.length > 30) {
+                    alert('invalidating input for security reasons. Input string too long!');
+                    logger.error('Invalid data entered');
+                    return;
+                }
+                if (type == 'ec2' && resource.substring(0, 2) != 'i-') {
+                    alert('Entered resource is not a valid ID for an ec2 instance');
+                    logger.error('Invalid data entered');
+                    return;
+                }
+
+                if (type == 'vpc' && resource.substring(0, 4) != 'vpc-') {
+                    alert('Entered resource is not a valid ID for a VPC configuration');
+                    logger.error('Invalid data entered');
+                    return;
+                }
+
+                $('.userInput').hide();
+                $('.navigation').show();
+                var fs = [false, false, false, false, false];
+                main({
+                    'type' : type,
+                    'id' : resource
+                }, null);
+
+            }
+        </script>
+        <div class='navigation'>
+            <label>
+                <input type='checkbox' id='ec2' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);"
+                checked disabled>
+                EC2 Instances</label>
+            <label>
+                <input type='checkbox' id='vol' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                Volumes</label>
+            <label>
+                <input type='checkbox' id='sg' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                Security Groups</label>
+            <label>
+                <input type='checkbox' id='subnet' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                Subnets</label>
+            <label>
+                <input type='checkbox' id='zone' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                Placement Zones</label>
+            <label>
+                <input type='checkbox' id='ami' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                AMI</label>
+            <label>
+                <input type='checkbox' id='publicIP' onchange="handleChange({'type': $('#ec2_radio').is(':checked') ? 'ec2':'vpc','id':document.getElementById('resId').value},this);">
+                Public IPs</label>
+            <script type="text/javascript">
+                // handle field selectors in powers of 2. i.e. total value when are checked is 47 (1+2+4+8+32 = 47)
+                var fieldSelector = {
+                    'vol' : false,
+                    'sg' : false,
+                    'subnet' : false,
+                    'zone' : false,
+                    'ami' : false,
+                    'publicIP' : false
+                };
+
+                function handleChange(resource, cb) {
+
+                    fieldSelector.vol = ($('#vol').is(':checked'));
+                    fieldSelector.sg = ($('#sg').is(':checked'));
+                    fieldSelector.subnet = ($('#subnet').is(':checked'));
+                    fieldSelector.zone = ($('#zone').is(':checked'));
+                    fieldSelector.ami = ($('#ami').is(':checked'));
+                    fieldSelector.publicIP = ($('#publicIP').is(':checked'));
+                    $('svg').remove();
+                    main(resource, fieldSelector);
+
+                }
+            </script>
+        </div>
+    </body>
+    <div id="overlay">
+        <div>
+            <div id="stylized" class="userInput">
+                <form id="form" name="form">
+
+                    <h1>Search</h1>
+
+                    <p>
+                        Select the AWS Resource type and enter the ID
+                    </p>
+                    <label for='ec2_radio'>EC2-Instance</label>
+                    <input type="radio" name='resource' checked id="ec2_radio"
+                    />
+                    </br>
+                    <label for='vpc_radio'>VPC ID</label>
+                    <input type="radio" name='resource' id="vpc_radio" />
+                    </br>
+                    <label for='resId'>ResourceId</label>
+                    <input type="text" clear='both' name="resId" id="resId"
+                    />
+                    </br>
+                    </br>
+                    <a onclick="overlay($('#ec2_radio').is(':checked') ? 'ec2':'vpc',document.getElementById('resId').value, false)"
+                    href="#">Search</a>
+
+                </form>
+            </div>
+
+</html>

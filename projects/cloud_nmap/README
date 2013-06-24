@@ -1,0 +1,16 @@
+=================================
+Cloud deployment visualization
+=================================
+
+This module provides the front end for querying EDDA. This module is built of Vivagraph platform. 
+
+For the purpose of visualization, different cloud components are denoted by different icons that are 
+connected to each other with the EC2 instance in focus. 
+
+This module aims to solve the complex problem of figuring out the contextual relationship between 
+different cloud components like storage volumes, subnets, security groups etc. 
+
+Apart from this we can also infer many important properties like public facing instanes (with public IPs), unused volumes etc which can be vital for any organization to save on costs and increase security awareness. 
+
+This is a work in progress and more properties can be easily added once EDDA is configured. 
+
